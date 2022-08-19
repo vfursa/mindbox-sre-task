@@ -1,0 +1,78 @@
+---
+### Deployment
+apiVersion: apps/v1
+kind: Deployment
+# По заданию не указано название web-сервера, который будет отдавать данные веб-приложения, допустим это будет php-apache.
+metadata:
+  name: php-apache
+spec:
+  selector:
+    matchLabels:
+      run: php-apache
+# Для обеспечения отказоустойчивости зададим минимум две реплики и зададим порядок обновления чтобы одна реплика всегда оставалась.
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        run: php-apache
+    spec:
+      containers:
+      - name: php-apache
+        image: registry.k8s.io/hpa-example
+        ports:
+        - containerPort: 80
+        resources:
+# Зададим лимиты чуть больше указанных в задании(0.1 CPU и 128M memory), чтобы для небольшого превышения не создавалась следующая реплика.
+          limits:
+            cpu: 200m
+            memory: 160Mi  
+          requests:
+            cpu: 100m
+            memory: 128Mi
+# Проверим старт приложения запросом по 80-ому порту 3 попытками по 4 секунды. По заданию 5 - 10 секунд требуется для инициализации.
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /
+            port: 80
+          periodSeconds: 4
+          successThreshold: 1
+          timeoutSeconds: 1
+---
+### Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: php-apache
+  labels:
+    run: php-apache
+spec:
+  ports:
+  - port: 80
+  selector:
+    run: php-apache
+---
+### HorizontalPodAutoscaler
+# Настроим требуемое масштабирование приложения. v1 выбираем как оптимальное согласно документации:
+# https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale-walkthrough/
+ 
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: php-apache
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: php-apache
+# Для отказоустойчивости зададим минимум 2 реплики, максимальная отказоустойчивость с большим минимальным количеством реплик ограничена требованием минимального потребления ресурсов.
+  minReplicas: 2
+# Для максимальной отказоустойчивости зададим максимум 5 реплик для развертывания на максимально доступном количестве нод. Согласно задания ожидаем, что в штатном режиме количество реплик не превысит 4.
+  maxReplicas: 5
+# Для первых запросов приложения выделим 0.2 CPU.
+  targetCPUUtilizationPercentage: 20
